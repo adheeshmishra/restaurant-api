@@ -2,6 +2,7 @@ import { Router } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import supabase from "../db/supabase.js";
 import { MENU, COMBO_INFO } from "../constants/constants.js";
+
 const router = Router();
 
 const SYSTEM_PROMPT = `You are a friendly, knowledgeable food guide at Burger Singh Bhopal — an Indian-fusion burger restaurant. You're like a helpful friend at the counter: warm, genuine, not pushy.
@@ -30,7 +31,15 @@ UPSELL RULES:
 - Never suggest more than one add-on at a time
 - If they say no to an upsell, drop it immediately
 
-NEVER discuss anything outside the menu. Redirect politely if asked.`;
+NEVER discuss anything outside the menu. Redirect politely if asked.
+
+RESPONSE FORMAT:
+You must always respond with a JSON object and nothing else. No markdown backticks, no extra text.
+{
+  "reply": "your response here",
+  "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"]
+}
+Suggestions must be short (5 words max), natural follow-up questions a customer would actually ask next.`;
 
 router.post("/", async (req, res) => {
   const { messages, sessionId } = req.body;
@@ -49,9 +58,18 @@ router.post("/", async (req, res) => {
       messages,
     });
 
-    const reply = response.content[0].text;
+    const raw = response.content[0].text;
 
-    // save user message and assistant reply to supabase
+    let reply, suggestions;
+    try {
+      const parsed = JSON.parse(raw);
+      reply = parsed.reply;
+      suggestions = parsed.suggestions || [];
+    } catch {
+      reply = raw;
+      suggestions = [];
+    }
+
     const lastUserMessage = messages[messages.length - 1];
     await supabase.from("conversations").insert([
       {
@@ -68,7 +86,7 @@ router.post("/", async (req, res) => {
       },
     ]);
 
-    res.json({ reply });
+    res.json({ reply, suggestions });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong" });
