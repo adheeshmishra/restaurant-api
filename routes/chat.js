@@ -1,11 +1,10 @@
 import { Router } from "express";
 import Anthropic from "@anthropic-ai/sdk";
+import supabase from "../db/supabase.js";
 
 const router = Router();
 
 const MENU = `
-If the customer asks anything unrelated to the menu, food, or restaurant, politely redirect them. Say something like "I'm only here to help you navigate our menu! Ask me about any dish, combo, or recommendation 😊
-
 BURGERS (Non-Veg):
 - Singh is Kinng: ₹149 — double chicken patty, mint chutney, pickled onions, house sauce. Spice: 2/3
 - Maharaja Burger: ₹169 — crispy chicken, cheddar, fried onions, royal mayo. Spice: 1/3
@@ -19,7 +18,7 @@ BURGERS (Veg):
 
 SIDES:
 - Masala Fries: ₹79 — chaat masala, fresh coriander
-- Loaded Fries: ₹119 — cheese sauce, jalapeños, crispy onions
+- Loaded Fries: ₹119 — cheese sauce, jalapeños, crispy fried onions
 - Onion Rings: ₹89 — beer-battered, chipotle dip
 
 DRINKS:
@@ -34,10 +33,12 @@ const SYSTEM_PROMPT = `You are the friendly AI food guide at Burger Singh Bhopal
 Here is the full menu:
 ${MENU}
 
-Help customers find dishes that match their preferences, explain ingredients and spice levels, suggest combos, and recommend for first-timers, vegetarians, and spice lovers. Be warm and concise — 2-3 sentences unless they ask for more. Never make up items not on the menu.`;
+Help customers find dishes that match their preferences, explain ingredients and spice levels, suggest combos, and recommend for first-timers, vegetarians, and spice lovers. Be warm and concise — 2-3 sentences unless they ask for more. Never make up items not on the menu.
+
+If the customer asks anything unrelated to the menu, food, or restaurant, politely redirect them. Say something like "I'm only here to help you navigate our menu! Ask me about any dish, combo, or recommendation 😊"`;
 
 router.post("/", async (req, res) => {
-  const { messages } = req.body;
+  const { messages, sessionId } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: "messages array is required" });
@@ -53,7 +54,26 @@ router.post("/", async (req, res) => {
       messages,
     });
 
-    res.json({ reply: response.content[0].text });
+    const reply = response.content[0].text;
+
+    // save user message and assistant reply to supabase
+    const lastUserMessage = messages[messages.length - 1];
+    await supabase.from("conversations").insert([
+      {
+        restaurant_id: process.env.RESTAURANT_ID,
+        session_id: sessionId,
+        role: "user",
+        message: lastUserMessage.content,
+      },
+      {
+        restaurant_id: process.env.RESTAURANT_ID,
+        session_id: sessionId,
+        role: "assistant",
+        message: reply,
+      },
+    ]);
+
+    res.json({ reply });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong" });
